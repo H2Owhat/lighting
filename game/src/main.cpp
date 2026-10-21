@@ -18,6 +18,7 @@ enum TileType : int
     DIRT,       // Marks the path, cannot be overwritten
     WAYPOINT,   // Marks where the path turns, cannot be overwritten
     TURRET,
+    FLAMETHROWER,
     COUNT
 };
 
@@ -41,12 +42,13 @@ void DrawTile(int row, int col, Color color)
 
 void DrawTile(int row, int col, int type)
 {
-    Color colors[4] =
+    Color colors[5] =
     {
         GREEN,
         BEIGE,
         SKYBLUE,
-        PURPLE
+        PURPLE,
+        YELLOW
 
     };
     //assert(type >= 0 && type < COUNT);
@@ -129,6 +131,16 @@ struct Enemy
     
 };
 
+struct FlameThrower
+{
+    Cell cell;
+    Enemy* target;
+    float damage;
+    float fireRate;
+    float fireRateMax;
+    float range;
+};
+
 // Fill in for Lab 2
 struct Turret
 {
@@ -154,7 +166,7 @@ int main()
             { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0 }, // 6
             { 0, 0, 0, 2, 1, 1, 1, 1, 1, 1, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0 }, // 7
             { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, // 8
-            { 0, 0, 0, 1, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, // 9
+            { 0, 0, 0, 1, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, // 9
             { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, // 10
             { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, // 11
             { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, // 12
@@ -184,6 +196,12 @@ int main()
     Turret turret{};
     turret.damage = 1;
     turret.fireRate = 2;
+
+    std::vector<FlameThrower> flamethrowers;
+    FlameThrower flamethrower{};
+    flamethrower.damage = 0.01f;
+    flamethrower.fireRate = 1;
+
     std::vector<Enemy> enemies;  // Use in Lab 2 and Assignment 1
    
 
@@ -201,6 +219,7 @@ int main()
   //  turrets[2].cell = { 15, 14 };
 
     // Search array for desired tiles (ie turrets)
+
     for (int row = 0; row < TILE_SIZE; row++)
     {
         for (int col = 0; col < TILE_SIZE; col++)
@@ -218,10 +237,35 @@ int main()
         }
     }
 
+
+    for (int row = 0; row < TILE_SIZE; row++)
+    {
+        for (int col = 0; col < TILE_SIZE; col++)
+        {
+            if (tiles[row][col] == 4)
+            {
+                // Construct turret here
+                FlameThrower flamethrower{};
+                flamethrower.cell = { row, col };
+                flamethrower.damage = 0.04f;
+                turret.fireRate = 6.0f;
+                turret.fireRateMax = 10.0f;
+                flamethrowers.push_back(flamethrower);
+            }
+        }
+    }
+
+   
     float levelTime = 0.0f;
     int numEnemys = 0;
     InitWindow(SCREEN_SIZE, SCREEN_SIZE, "Tower Defense");
+    InitAudioDevice();
     SetTargetFPS(60);
+
+    Sound flame = LoadSound("./assets/audio/flamethrower.WAV");
+    Sound shot = LoadSound("./assets/audio/shot.WAV");
+    Sound enemyHit = LoadSound("./assets/audio/enemyHit.WAV");
+    Sound enemyDead = LoadSound("./assets/audio/enemyDead.WAV");
     while (!WindowShouldClose())
     {
         float dt = GetFrameTime();
@@ -299,7 +343,45 @@ int main()
                 bullet.color.g = GetRandomValue(0, 255);
                 bullet.color.b = GetRandomValue(0, 255);
                 bullet.color.a = 255;
+                PlaySound(shot);
+                bullets.push_back(bullet);
+            }
+        }
 
+
+        for (FlameThrower& flamethrower : flamethrowers)
+        {
+            Vector2 flamethrower_position = TileCenter(flamethrower.cell.row, flamethrower.cell.col);
+            float max = FLT_MAX;
+            for (Enemy& enemy : enemies)
+            {
+                Vector2 enemy_position = enemy.enemy_position;
+                float distance = Vector2Distance(flamethrower_position, enemy_position);
+                if (distance < max)
+                {
+                    max = distance;
+
+                    // Target nearest enemy
+                    flamethrower.target = &enemy;
+                }
+            }
+            //closest enemy has been stored in turret.
+            flamethrower.fireRate += dt;
+            if (flamethrower.fireRate >= flamethrower.fireRateMax && flamethrower.target != nullptr)
+            {
+                flamethrower.fireRate = 0.0f;
+
+                Bullet bullet{};
+                bullet.position = flamethrower_position;
+                bullet.direction = Vector2Normalize(flamethrower.target->enemy_position - bullet.position);
+
+                bullet.speed = GetRandomValue(250, 500);
+                bullet.radius = GetRandomValue(10, 20);
+                bullet.damage = flamethrower.damage;
+
+                bullet.color.r = GetRandomValue(175, 255);
+                bullet.color.a = 255;
+                PlaySound(flame);
                 bullets.push_back(bullet);
             }
         }
@@ -355,10 +437,12 @@ int main()
                 if (CheckCollisionCircles(bullet.position, bullet.radius, enemy.enemy_position, 20))
                 {
                     enemy.health -= bullet.damage;
+                    PlaySound(enemyHit);
                     bullet.destroy = true;
                     if (enemy.health <= 0)
                     {
                         enemy.destroy = true;
+                        PlaySound(enemyDead);
                     }
                 }
                 // If so, damage the enemy
@@ -409,6 +493,11 @@ int main()
 
         EndDrawing();
     }
+    UnloadSound(shot);
+    UnloadSound(flame);
+    UnloadSound(enemyHit);
+    UnloadSound(enemyDead);
+    CloseAudioDevice();
     CloseWindow();
     return 0;
 }
