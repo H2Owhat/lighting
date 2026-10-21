@@ -108,6 +108,7 @@ struct Bullet
     float speed;
     float time;
     float radius;
+    float damage;
     Color color;
     bool destroy;
 };
@@ -116,9 +117,15 @@ struct Bullet
 struct Enemy
 {
     Cell cell;
-    float enemy_speed;
-    float health;
-    bool destroy;
+    float health= 10.0f;
+    int curr = 0;
+    int next = curr + 1;
+
+    Vector2 enemy_position;// = TileCenter(waypoints[curr].row, waypoints[curr].col);
+    float enemy_speed = 250.0f;   // <-- 250 pixels per second
+    float min_distance = enemy_speed / 60.0f * 1.1f;
+    bool at_end = false;
+    bool destroy =false;
     
 };
 
@@ -128,7 +135,8 @@ struct Turret
     Cell cell;
     Enemy* target;
     int damage;
-    int fireRate;
+    float fireRate;
+    float fireRateMax;
     float range;
 };
 
@@ -159,14 +167,14 @@ int main()
             { 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }  // 19
     };
     std::vector<Cell> waypoints = FloodFill({ 0, 12 }, tiles, WAYPOINT);
-    int curr = 0;
-    int next = curr + 1;
+    //int curr = 0;
+    //int next = curr + 1;
 
-    Vector2 enemy_position = TileCenter(waypoints[curr].row, waypoints[curr].col);
-    float enemy_speed = 250.0f;   // <-- 250 pixels per second
-    float min_distance = enemy_speed / 60.0f;
-    min_distance *= 1.1f;
-    bool at_end = false;
+    //Vector2 enemy_position = TileCenter(waypoints[curr].row, waypoints[curr].col);
+    //float enemy_speed = 250.0f;   // <-- 250 pixels per second
+    //float min_distance = enemy_speed / 60.0f;
+    //min_distance *= 1.1f;
+    //bool at_end = false;
 
     float bullet_time_current = 0.0f;
     float bullet_time_total = 0.25f;
@@ -177,12 +185,7 @@ int main()
     turret.damage = 1;
     turret.fireRate = 2;
     std::vector<Enemy> enemies;  // Use in Lab 2 and Assignment 1
-    Enemy enemy{};
-    enemy.cell = { 0, 12 };
-    enemy.enemy_speed = 100.0f;
-    enemy.health = 2.0f;
-    enemy.destroy = false;
-    enemies.push_back(enemy);
+   
 
     
 
@@ -207,40 +210,58 @@ int main()
                 // Construct turret here
                 Turret turret{};
                 turret.cell = { row, col };
+                turret.fireRate = 1.0f;
+                turret.fireRateMax = 1.0f;
+                turret.damage = 1.0f;
                 turrets.push_back(turret);
             }
         }
     }
 
+    float levelTime = 0.0f;
+    int numEnemys = 0;
     InitWindow(SCREEN_SIZE, SCREEN_SIZE, "Tower Defense");
     SetTargetFPS(60);
     while (!WindowShouldClose())
     {
         float dt = GetFrameTime();
-
+        levelTime += dt;
+        //everytime a second passes 
+        // want to spawn 1 enemy 
+        // and keep track of how many have spawned and stop when reach 10
+        if (levelTime > numEnemys && numEnemys <10)
+        {
+            Enemy enemyTest{};
+            enemyTest.enemy_position = TileCenter(waypoints[enemyTest.curr].row, waypoints[enemyTest.curr].col);
+            enemyTest.cell = { 0, 12 };
+            enemyTest.enemy_speed = 100.0f;
+            enemyTest.destroy = false;
+            enemies.push_back(enemyTest);
+            numEnemys++;
+        }
         // Enemy movement (need to loop through enemies vector to get marks on Lab 2 and Assignment 1)
        for (Enemy& enemy : enemies)
         {
             // Apply enemy movement and gameplay logic (such as flagging for removal when health is <= 0.0f) here
-            if (!at_end)
-        {
-                
-            Vector2 from = TileCenter(waypoints[curr].row, waypoints[curr].col);
-            Vector2 to = TileCenter(waypoints[next].row, waypoints[next].col);
-            Vector2 direction = Vector2Normalize(to - from);
-            enemy_position += direction * enemy_speed * dt;
-        
-            // Tolorance depends on enemy speed
-            if (CheckCollisionPointCircle(enemy_position, to, min_distance))
+            if (!enemy.at_end)
             {
-                enemy_position = to;
+                
+                Vector2 from = TileCenter(waypoints[enemy.curr].row, waypoints[enemy.curr].col);
+                Vector2 to = TileCenter(waypoints[enemy.next].row, waypoints[enemy.next].col);
+                Vector2 direction = Vector2Normalize(to - from);
+                enemy.enemy_position += direction * enemy.enemy_speed * dt;
         
-                curr++;
-                next++;
-                at_end = curr == waypoints.size() - 1;
-            }
+                // Tolorance depends on enemy speed
+                if (CheckCollisionPointCircle(enemy.enemy_position, to, enemy.min_distance))
+                {
+                    enemy.enemy_position = to;
+        
+                    enemy.curr++;
+                    enemy.next++;
+                    enemy.at_end = enemy.curr == waypoints.size() - 1;
+                }
             
-        }
+            }
         }
         
         // Acquire nearest enemy as target and shoot it if the turret is off-cooldown
@@ -250,14 +271,36 @@ int main()
             float max = FLT_MAX;
             for (Enemy& enemy : enemies)
             {
-                Vector2 enemy_position = TileCenter(enemy.cell.row, enemy.cell.col);
+                Vector2 enemy_position = enemy.enemy_position;
                 float distance = Vector2Distance(turret_position, enemy_position);
                 if (distance < max)
                 {
                     max = distance;
                    
                     // Target nearest enemy
+                    turret.target = &enemy;
                 }
+            }
+            //closest enemy has been stored in turret.
+            turret.fireRate += dt;
+            if (turret.fireRate >= turret.fireRateMax && turret.target != nullptr)
+            {
+                turret.fireRate = 0.0f;
+
+                Bullet bullet{};
+                bullet.position = turret_position;
+                bullet.direction = Vector2Normalize(turret.target->enemy_position - bullet.position);
+
+                bullet.speed = GetRandomValue(250, 500);
+                bullet.radius = GetRandomValue(10, 50);
+                bullet.damage = turret.damage;
+
+                bullet.color.r = GetRandomValue(0, 255);
+                bullet.color.g = GetRandomValue(0, 255);
+                bullet.color.b = GetRandomValue(0, 255);
+                bullet.color.a = 255;
+
+                bullets.push_back(bullet);
             }
         }
 
@@ -265,25 +308,25 @@ int main()
         
 
         // Bullet creation
-        bullet_time_current += dt;
-        if (bullet_time_current >= bullet_time_total && IsKeyDown(KEY_SPACE))
-        {
-            bullet_time_current = 0.0f;
+        //bullet_time_current += dt;
+        //if (bullet_time_current >= bullet_time_total && IsKeyDown(KEY_SPACE))
+        //{
+        //    bullet_time_current = 0.0f;
 
-            Bullet bullet{};
-            bullet.position = GetMousePosition();
-            bullet.direction = Vector2Normalize(enemy_position - bullet.position);
+        //    Bullet bullet{};
+        //    bullet.position = GetMousePosition();
+        //    bullet.direction = Vector2Normalize(enemy.enemy_position - bullet.position);
 
-            bullet.speed = GetRandomValue(250, 500);
-            bullet.radius = GetRandomValue(10, 50);
+        //    bullet.speed = GetRandomValue(250, 500);
+        //    bullet.radius = GetRandomValue(10, 50);
 
-            bullet.color.r = GetRandomValue(0, 255);
-            bullet.color.g = GetRandomValue(0, 255);
-            bullet.color.b = GetRandomValue(0, 255);
-            bullet.color.a = 255;
+        //    bullet.color.r = GetRandomValue(0, 255);
+        //    bullet.color.g = GetRandomValue(0, 255);
+        //    bullet.color.b = GetRandomValue(0, 255);
+        //    bullet.color.a = 255;
 
-            bullets.push_back(bullet);
-        }
+        //    bullets.push_back(bullet);
+        //}
 
         // Bullet update
         for (Bullet& bullet : bullets)
@@ -293,7 +336,7 @@ int main()
             bullet.time += dt;
 
             // "Flag the current bullet to be destroyed if its been alive for 1 or more seconds"
-            bullet.destroy |= bullet.time >= 1.0f;
+            bullet.destroy |= bullet.time >= 2.5f;
 
             Rectangle screen_rec;
             screen_rec.x = 0.0f;
@@ -309,8 +352,18 @@ int main()
             for (Enemy& enemy : enemies)
             {
                 // Check if the current bullet is colliding with the current enemy
+                if (CheckCollisionCircles(bullet.position, bullet.radius, enemy.enemy_position, 20))
+                {
+                    enemy.health -= bullet.damage;
+                    bullet.destroy = true;
+                    if (enemy.health <= 0)
+                    {
+                        enemy.destroy = true;
+                    }
+                }
                 // If so, damage the enemy
                 // Do any on-bullet-enemy behaviour here such as playing sounds
+
             }
         }
 
@@ -343,10 +396,16 @@ int main()
 
         for (const Turret& turret : turrets)
         {
-            DrawRectangleV(TileCenter(turret.cell.row, turret.cell.col), { TILE_SIZE, TILE_SIZE }, ORANGE);
+          //  DrawRectangle (turret.cell.col* TILE_SIZE, turret.cell.row* TILE_SIZE,  TILE_SIZE, TILE_SIZE , ORANGE);
+            DrawCircleV( TileCenter(turret.cell.row, turret.cell.col), TILE_SIZE*0.5f, ORANGE);
         }
         
-        DrawCircleV(enemy_position, 20.0f, GOLD);
+        for (const Enemy& enemy : enemies)
+        {
+            DrawCircleV(enemy.enemy_position, 20.0f, GOLD);
+        }
+
+        DrawText(TextFormat("Timer : %.2f",levelTime),0,0,24,BLACK);
 
         EndDrawing();
     }
